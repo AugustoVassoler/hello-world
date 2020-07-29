@@ -1,0 +1,141 @@
+diff --git a/software/include/interfaces/adcs_interface.h b/software/include/interfaces/adcs_interface.h
+index be00092..6ddb760 100644
+--- a/software/include/interfaces/adcs_interface.h
++++ b/software/include/interfaces/adcs_interface.h
+@@ -6,4 +6,24 @@
+ #ifndef ADCS_INTERFACE_H_
+ #define ADCS_INTERFACE_H_
+ 
++struct
++{
++  /* ... */
++} adcs_interface_imu_data;
++
++struct
++{
++  struct adcs_interface_imu_data imu_data;
++  double reaction_wheel_velocity;
++} adcs_interface_read_data;
++typedef struct adcs_interface_read_data adcs_interface_read_data;
++
++int adcs_interface_create ();
++
++void adcs_interface_destroy ();
++
++void adcs_interface_read (adcs_interface_read_data *read_data);
++
++void adcs_interface_write (double control_signal);
++
+ #endif /* ADCS_INTERFACE_H_ */
+diff --git a/software/include/threads/adcs_thread.h b/software/include/threads/adcs_thread.h
+index ff5e9a2..f510010 100644
+--- a/software/include/threads/adcs_thread.h
++++ b/software/include/threads/adcs_thread.h
+@@ -6,4 +6,6 @@
+ #ifndef ADCS_THREAD_H_
+ #define ADCS_THREAD_H_
+ 
++void adcs_thread_loop_body (void);
++
+ #endif /* ADCS_THREAD_H_ */
+diff --git a/software/include/utils/adcs_utils.h b/software/include/utils/adcs_utils.h
+index 8eff1af..f83a2b2 100644
+--- a/software/include/utils/adcs_utils.h
++++ b/software/include/utils/adcs_utils.h
+@@ -6,4 +6,36 @@
+ #ifndef ADCS_UTILS_H_
+ #define ADCS_UTILS_H_
+ 
++struct
++{
++  double q0;
++  double q1;
++  double q2;
++  double q4;
++} adcs_utils_quaternion;
++
++struct
++{
++  double x;
++  double y;
++  double z;
++} adcs_utils_vector;
++
++adcs_utils_vector adcs_utils_reference_magnetic_field_vector (/* ... */);
++
++adcs_utils_vector adcs_utils_reference_gravity_vector (/* ... */);
++
++adcs_utils_vector adcs_utils_body_magnetic_field_vector (/* sensor data */);
++
++adcs_utils_vector adcs_utils_body_gravity_vector (/* sensor data */);
++
++struct adcs_utils_quaternion quest (double w1, double w2, adcs_utils_vector b1,
++                                    adcs_utils_vector b2, adcs_utils_vector r1,
++                                    adcs_utils_vector b2);
++
++/* Needs: */
++/* Attitude, target, reaction wheel velocity */
++/* IMU data */
++double control_agorithm (/* ... */);
++
+ #endif /* ADCS_UTILS_H_ */
+diff --git a/software/src/threads/adcs_thread.c b/software/src/threads/adcs_thread.c
+index 0296256..6c4ed24 100644
+--- a/software/src/threads/adcs_thread.c
++++ b/software/src/threads/adcs_thread.c
+@@ -1 +1,55 @@
+ #include "adcs_thread.h"
++#include <stdbool.h>
++
++static bool gotStabilizationTarget;
++
++static adcs_utils_quaternion target;
++
++void
++adcs_thread_loop_body ()
++{
++
++  adcs_interface_interface_read_data read;
++
++  adcs_interface_read (&read);
++
++  adcs_utils_vector b1
++      = adcs_utils_body_magnetic_field_vector (/* read... sensor data */);
++  adcs_utils_vector b2
++      = adcs_utils_body_gravity_vector (/* read... sensor data */);
++
++  adcs_utils_vector r1
++      = adcs_utils_reference_magnetic_field_vector (/* orbital pos */);
++  adcs_utils_vector r2
++      = adcs_utils_reference_gravity_vector (/* orbital pos */);
++
++  adcs_utils_quaternion attitude = adcs_utils_quest (w1, w2, b1, b2, r1, r2);
++
++  attitude_manager_set_attitude (attitude);
++
++  if (obdh_get_state () == OBDH_STABILIZATION_STATE)
++    {
++
++      if (!gotStabilizationTarget)
++        {
++          target = attitude_manager_get_target (); /* Get target */
++          /* define timeout */
++        }
++      else
++        {
++          if (/* check timeout */)
++            {
++              obdh_handle_signal (OBDH_STABILIZATION_TIMEOUT_SIGNAL);
++            }
++        }
++
++      /* control algorithm */
++      adcs_interface_write (
++          adcs_utils_control_algorithm (/* target diff and sensor data */));
++
++      if (/* got to target */)
++        {
++          obdh_handle_signal (OBDH_DONE_STABILIZATION_SIGNAL);
++        }
++    }
++}
